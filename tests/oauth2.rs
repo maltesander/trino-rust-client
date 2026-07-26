@@ -182,6 +182,55 @@ async fn oauth2_401_without_challenge_is_http_not_ok() {
     assert_eq!(handler.seen.lock().unwrap().len(), 0);
 }
 
+/// A coordinator with several authentication types configured
+/// (`http-server.authentication.type=PASSWORD,OAUTH2`) answers a 401 with one
+/// `WWW-Authenticate` header per type, in configuration order — verified against
+/// Trino 478, which puts `Basic realm="Trino"` FIRST. Reading only the first
+/// header would miss the Bearer challenge and surface a bare `HttpNotOk(401)`.
+#[tokio::test]
+async fn oauth2_finds_bearer_challenge_after_basic_challenge() {
+    let server = MockServer::start().await;
+    let challenge = format!(
+        r#"Bearer x_redirect_server="https://login/redirect", x_token_server="{}/oauth2/token/abc""#,
+        server.uri()
+    );
+
+    Mock::given(method("POST"))
+        .and(path("/v1/statement"))
+        .and(HeaderAbsent("authorization"))
+        .respond_with(
+            ResponseTemplate::new(401)
+                .append_header("WWW-Authenticate", r#"Basic realm="Trino""#)
+                .append_header("WWW-Authenticate", challenge.as_str()),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/oauth2/token/abc"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "token": "test-token"
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/statement"))
+        .and(header("authorization", "Bearer test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(finished_query_json()))
+        .mount(&server)
+        .await;
+
+    let handler = Arc::new(RecordingHandler {
+        seen: Mutex::new(vec![]),
+    });
+    let client = client_for(&server, handler.clone());
+
+    client.get_all::<Row>("SELECT 1").await.expect("query ok");
+    assert_eq!(handler.seen.lock().unwrap().len(), 1);
+}
+
 /// Simulates a cached OAuth2 token expiring between two queries on the same
 /// client. The re-auth retry must carry exactly ONE `Authorization` header —
 /// `bearer_auth` APPENDS, so if auth is applied before the retry clone is taken

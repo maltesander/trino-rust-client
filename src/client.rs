@@ -1266,11 +1266,17 @@ impl Client {
 
         if resp.status() == StatusCode::UNAUTHORIZED {
             if let (Some(Auth::OAuth2(state)), Some(retry_req)) = (self.auth.as_ref(), retry_req) {
+                // A coordinator with several authentication types configured
+                // (e.g. `http-server.authentication.type=PASSWORD,OAUTH2`) sends
+                // one `WWW-Authenticate` header per type, in configuration
+                // order — so `Basic realm="Trino"` may well precede the Bearer
+                // challenge. Scan all of them for the OAuth2 one.
                 if let Some(challenge) = resp
                     .headers()
-                    .get(reqwest::header::WWW_AUTHENTICATE)
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(crate::auth::parse_www_authenticate)
+                    .get_all(reqwest::header::WWW_AUTHENTICATE)
+                    .iter()
+                    .filter_map(|v| v.to_str().ok())
+                    .find_map(crate::auth::parse_www_authenticate)
                 {
                     self.acquire_oauth2_token(state, &challenge, sent_token)
                         .await?;

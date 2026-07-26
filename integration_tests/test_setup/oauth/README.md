@@ -16,8 +16,27 @@ against a real Trino coordinator and a real IdP (Keycloak). It backs
 - **Keycloak** (`realm=trino`, confidential client `trino`/`trino-secret`, user
   `alice`/`alice`) on `http://keycloak:8080`.
 - **Trino 478** coordinator with TLS on `8443` and
-  `http-server.authentication.type=oauth2`, plus a `memory` catalog.
+  `http-server.authentication.type=PASSWORD,OAUTH2`, plus a `memory` catalog.
 - A one-shot job that generates a self-signed keystore for the coordinator.
+
+### Why two authentication types
+
+A coordinator with several authentication types emits **one `WWW-Authenticate`
+header per type**, in configuration order. Verified against Trino 478:
+
+```console
+$ curl -sk -i -X POST https://localhost:8443/v1/statement -H 'X-Trino-User: alice' --data 'SELECT 1'
+HTTP/2 401
+www-authenticate: Basic realm="Trino"
+www-authenticate: Bearer x_redirect_server="https://localhost:8443/oauth2/token/initiate/...", x_token_server="..."
+```
+
+`Basic` comes first, so a client that reads only the first header never sees the
+Bearer challenge and fails with a bare `401`. `PASSWORD` is listed first here on
+purpose to keep the manual e2e run on that hostile ordering. The file-based
+password authenticator (`password-authenticator.properties`, `password.db` —
+`alice` / `alice`, bcrypt) exists only to make the second type valid; the test
+still authenticates via OAuth2.
 
 ## Two gotchas (read before running)
 

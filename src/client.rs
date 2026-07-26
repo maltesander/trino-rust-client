@@ -599,8 +599,11 @@ impl<T> Drop for RowStream<'_, T> {
                     req = match auth {
                         Auth::Basic(u, p) => req.basic_auth(u, p.as_ref()),
                         Auth::Jwt(t) => req.bearer_auth(t),
-                        // Full acquisition/polling lands in a later task; for now
-                        // only attach a token if one is already cached.
+                        // Only ever the cached token: a `Drop` must not block on
+                        // an interactive login, so unlike `Client::auth_req` this
+                        // never runs the OAuth2 flow. With no cached token — or an
+                        // expired one — the cancellation is simply lost and the
+                        // coordinator times the query out on its own.
                         Auth::OAuth2(state) => match state.cached_token() {
                             Some(t) => req.bearer_auth(t),
                             None => req,
@@ -1229,8 +1232,9 @@ impl Client {
             match auth {
                 Auth::Basic(u, p) => req.basic_auth(u, p.as_ref()),
                 Auth::Jwt(t) => req.bearer_auth(t),
-                // Full acquisition/polling lands in a later task; for now only
-                // attach a token if one is already cached.
+                // Tokens are acquired lazily: with nothing cached the request
+                // goes out unauthenticated, and `send` runs the login flow on
+                // the resulting 401 challenge before retrying once.
                 Auth::OAuth2(state) => match state.cached_token() {
                     Some(t) => req.bearer_auth(t),
                     None => req,

@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://book.async.rs/overview
 ## [Unreleased]
 
 ### Added
-- `Client::begin_transaction`, `Client::commit` and `Client::rollback` for driving Trino transactions, plus `Client::transaction_id` / `Client::set_transaction_id` to inspect and set the session's transaction at runtime (previously only settable at build time via `ClientBuilder::transaction_id`)
+- `Client::begin_transaction`, `Client::commit` and `Client::rollback` for driving Trino transactions, plus `Client::transaction_id` / `Client::set_transaction_id` to inspect and set the session's transaction at runtime (previously only settable at build time via `ClientBuilder::transaction_id`). `begin_transaction` verifies that the coordinator actually returned a transaction id, so `Ok(())` means a transaction is active — a `START TRANSACTION` that succeeds without a usable `X-Trino-Started-Transaction-Id` (a header-stripping proxy, or the `NONE` sentinel) is reported as `Error::Transaction` instead of silently leaving later statements outside any transaction
 - `Error::Transaction` — returned when a transaction operation is attempted in a state that does not allow it (starting one while another is active, or committing/rolling back without one)
 - `TransactionId::is_active`
 
